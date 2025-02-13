@@ -1,5 +1,6 @@
 import * as bootstrap from 'bootstrap';
 import { useState, useEffect, useRef } from 'react';
+import { apiFetch } from './apiFetch';
 
 import './assets/style.css';
 
@@ -14,11 +15,11 @@ function App() {
     title: '',
     category: '',
     unit: '',
-    origin_price: '',
-    price: '',
+    origin_price: 0,
+    price: 0,
     description: '',
     content: '',
-    is_enabled: false,
+    is_enabled: 0,
     imagesUrl: [],
   });
 
@@ -29,11 +30,11 @@ function App() {
       title: product.title || '',
       category: product.category || '',
       unit: product.unit || '',
-      origin_price: product.origin_price || '',
-      price: product.price || '',
+      origin_price: product.origin_price || 0,
+      price: product.price || 0,
       description: product.description || '',
       content: product.content || '',
-      is_enabled: product.is_enabled || false,
+      is_enabled: product.is_enabled || 0,
       imagesUrl: product.imagesUrl || [],
     });
     productModalRef.current.show();
@@ -93,7 +94,6 @@ function App() {
     password: '',
   });
   const [isAuth, setIsAuth] = useState(false);
-  const [token, setToken] = useState(null);
 
   useEffect(() => {
     // const token = document.cookie
@@ -105,46 +105,38 @@ function App() {
       keyboard: false,
     });
 
+    const setModalControl = () => {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    };
+
     document
       .querySelector('#productModal')
-      .addEventListener('hide.bs.modal', () => {
-        if (document.activeElement instanceof HTMLElement) {
-          document.activeElement.blur();
-        }
-      });
+      .addEventListener('hide.bs.modal', setModalControl);
 
-    const token = document.cookie.replace(
-      /(?:(?:^|.*;\s*)hexToken\s*=\s*([^;]*).*$)|^.*$/,
-      '$1'
-    );
-
-    setToken(token);
-
-    if (token && token !== undefined) checkAdmin(token);
+    return () =>
+      document
+        .querySelector('#productModal')
+        .removeEventListener('hide.bs.modal', setModalControl);
   }, []);
 
-  const checkAdmin = async (token) => {
-    try {
-      const response = await fetch(`${VITE_URL}/api/user/check`, {
-        method: 'POST',
-        headers: new Headers({
-          'Content-Type': 'application/json',
-          Authorization: token,
-        }),
-      });
+  useEffect(() => {
+    checkAdmin();
+  }, []);
 
-      const data = await response.json();
+  const checkAdmin = async () => {
+    const url = `${VITE_URL}/api/user/check`;
 
-      if (data.success) {
-        getProducts(token);
-        setIsAuth(true);
-      }
-    } catch (error) {
-      console.log(error.response.data.message);
+    const data = await apiFetch(url, 'POST', true);
+
+    if (data?.success) {
+      setIsAuth(true);
+      getProducts();
     }
   };
 
-  const handleInputChange = (e) => {
+  const handleAccountInputChange = (e) => {
     const { id, value } = e.target;
     setFormData((prevData) => ({
       ...prevData,
@@ -154,60 +146,31 @@ function App() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    try {
-      const response = await fetch(`${VITE_URL}/admin/signin`, {
-        method: 'POST',
-        body: JSON.stringify(formData),
-        headers: new Headers({
-          'Content-Type': 'application/json',
-        }),
-      });
 
-      const data = await response.json();
+    const url = `${VITE_URL}/admin/signin`;
 
-      if (data.success) {
-        const { token, expired } = data;
-        document.cookie = `hexToken=${token};expires=${new Date(expired)};`;
-        setToken(token);
-        setIsAuth(true);
-        getProducts(token);
-      }
-    } catch (error) {
-      console.error('登入失敗: ' + error.response.data.message);
+    const data = await apiFetch(url, 'POST', false, JSON.stringify(formData));
+
+    if (data.success) {
+      const { token, expired } = data;
+      document.cookie = `hexToken=${token};expires=${new Date(expired)};`;
+      setIsAuth(true);
+      getProducts();
     }
   };
 
   //API
   const [products, setProducts] = useState([]);
-  const getProducts = async (token) => {
-    try {
-      const response = await fetch(
-        `${VITE_URL}/api/${VITE_PATH}/admin/products`,
-        {
-          method: 'GET',
-          headers: new Headers({
-            'Content-Type': 'application/json',
-            Authorization: token,
-          }),
-        }
-      );
+  const getProducts = async () => {
+    const url = `${VITE_URL}/api/${VITE_PATH}/admin/products`;
 
-      const data = await response.json();
-      setProducts(data.products);
-    } catch (error) {
-      console.error(error.response.data.message);
-    }
+    const data = await apiFetch(url, 'GET', true);
+
+    setProducts(data.products);
   };
 
-  const updateProductData = async (id) => {
-    let product;
-    if (modalType === 'edit') {
-      product = `product/${id}`;
-    } else {
-      product = `product`;
-    }
-
-    const url = `${VITE_URL}/api/${VITE_PATH}/admin/${product}`;
+  const addProductData = async () => {
+    const url = `${VITE_URL}/api/${VITE_PATH}/admin/product`;
 
     const body = JSON.stringify({
       data: {
@@ -219,69 +182,44 @@ function App() {
       },
     });
 
-    const headers = new Headers({
-      'Content-Type': 'application/json',
-      Authorization: token,
+    const data = await apiFetch(url, 'POST', true, body);
+
+    alert('新增成功', data.message);
+
+    closeModal();
+    getProducts();
+  };
+
+  const updateProductData = async (id) => {
+    const url = `${VITE_URL}/api/${VITE_PATH}/admin/product/${id}`;
+
+    const body = JSON.stringify({
+      data: {
+        ...templateData,
+        origin_price: Number(templateData.origin_price),
+        price: Number(templateData.price),
+        is_enabled: templateData.is_enabled ? 1 : 0,
+        imagesUrl: templateData.imagesUrl,
+      },
     });
 
-    try {
-      let response;
-      if (modalType === 'edit') {
-        response = await fetch(url, {
-          method: 'PUT',
-          body,
-          headers,
-        });
+    const data = await apiFetch(url, 'PUT', true, body);
 
-        const data = await response.json();
+    alert('更新成功', data.message);
 
-        alert('更新成功', data.message);
-      } else {
-        response = await fetch(url, {
-          method: 'POST',
-          body,
-          headers,
-        });
-
-        const data = await response.json();
-
-        alert('新增成功', data.message);
-      }
-
-      closeModal();
-      getProducts(token);
-    } catch (error) {
-      if (modalType === 'edit') {
-        console.error('更新失敗', error.response.data.message);
-      } else {
-        console.log(error);
-        console.error('新增失敗', error.response.data.message);
-      }
-    }
+    closeModal();
+    getProducts();
   };
 
   const delProductData = async (id) => {
-    try {
-      const response = await fetch(
-        `${VITE_URL}/api/${VITE_PATH}/admin/product/${id}`,
-        {
-          method: 'DELETE',
-          headers: new Headers({
-            'Content-Type': 'application/json',
-            Authorization: token,
-          }),
-        }
-      );
+    const url = `${VITE_URL}/api/${VITE_PATH}/admin/product/${id}`;
 
-      const data = await response.json();
+    const data = await apiFetch(url, 'DELETE', true);
 
-      alert('刪除成功', data.message);
+    alert('刪除成功', data.message);
 
-      closeModal();
-      getProducts(token);
-    } catch (error) {
-      console.error('刪除失敗', error.response.data.message);
-    }
+    closeModal();
+    getProducts();
   };
 
   return (
@@ -292,7 +230,7 @@ function App() {
             <div className='text-end mt-4'>
               <button
                 className='btn btn-primary'
-                onClick={() => openModal('new')}
+                onClick={() => openModal({}, 'new')}
               >
                 建立新的產品
               </button>
@@ -365,7 +303,7 @@ function App() {
                     id='username'
                     placeholder='name@example.com'
                     value={formData.username}
-                    onChange={handleInputChange}
+                    onChange={handleAccountInputChange}
                     required
                     autoFocus
                     autoComplete='current-username'
@@ -379,7 +317,7 @@ function App() {
                     id='password'
                     placeholder='Password'
                     value={formData.password}
-                    onChange={handleInputChange}
+                    onChange={handleAccountInputChange}
                     required
                     autoComplete='current-password'
                   />
@@ -650,7 +588,11 @@ function App() {
                   <button
                     type='button'
                     className='btn btn-primary'
-                    onClick={() => updateProductData(templateData.id)}
+                    onClick={() =>
+                      modalType === 'edit'
+                        ? updateProductData(templateData.id)
+                        : addProductData(templateData.id)
+                    }
                   >
                     確認
                   </button>
